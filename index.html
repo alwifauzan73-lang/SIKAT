@@ -6722,15 +6722,22 @@ const QK={
    state.session={code:'',title,questions:shuffle(p).slice(0,state.count),time:state.time,students:{},started:false,createdAt:Date.now()};
    $('qk-teacher-out').innerHTML='<div class="qk-status">⏳ Menyiapkan koneksi kelas...</div>';
 
-   // ID kelas dibuat oleh server PeerJS agar tidak terjadi bentrok ID manual.
-   state.peer=new Peer(undefined,{debug:0});
+   // Kode kelas pendek untuk dibagikan ke siswa.
+   // PeerJS tetap menggunakan ID yang sama dengan kode kelas agar siswa dapat terhubung langsung.
+   const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+   let shortCode='';
+   for(let i=0;i<8;i++) shortCode+=chars[Math.floor(Math.random()*chars.length)];
+   const classCode='TSM-'+shortCode;
+   state.session.code=classCode;
+   state.peer=new Peer(classCode,{debug:0});
    let opened=false;
    const openTimeout=setTimeout(()=>{
      if(!opened && $('qk-teacher-out')) $('qk-teacher-out').innerHTML='<div class="qk-status">❌ Server koneksi tidak merespons. Pastikan internet aktif lalu coba lagi.</div>';
    },15000);
    state.peer.on('open',id=>{
      opened=true;clearTimeout(openTimeout);
-     state.session.peerId=id; state.session.code=String(id).toUpperCase();
+     state.session.peerId=id;
+     state.session.code=classCode;
      saveClassSession(state.session);
      QK.teacherLobby();
    });
@@ -6809,7 +6816,7 @@ const QK={
  student(){
    closePeer();state.role='student';
    setApp('<div class="qk-card"><h3>👨‍🎓 Masuk Quiz Kelas</h3><p class="qk-note">Minta kode kelas dari guru. Gunakan nama yang mudah dikenali guru.</p>'+
-    '<label>Kode Kelas</label><input id="qk-code" class="qk-field" maxlength="10" placeholder="Contoh: TSM-ABC123">'+
+    '<label>Kode Kelas</label><input id="qk-code" class="qk-field" maxlength="12" placeholder="Contoh: TSM-AB12CD34">'+
     '<label>Nama Siswa</label><input id="qk-name" class="qk-field" maxlength="40" placeholder="Nama kamu">'+
     qButton('🚀 Masuk Kelas','QK.join()',true)+'<div id="qk-join-out"></div></div>');
  },
@@ -6897,7 +6904,14 @@ function saveClassSession(session){
   if(i>=0) list[i]=clean; else list.unshift(clean);
   localStorage.setItem(CLASS_STORE_KEY,JSON.stringify(list.slice(0,20)));
 }
-function deleteSavedClass(i){const list=loadSavedClasses();list.splice(i,1);localStorage.setItem(CLASS_STORE_KEY,JSON.stringify(list));QK.teacher()}
+function deleteSavedClass(i){
+  const list=loadSavedClasses();
+  if(i<0||i>=list.length)return;
+  list.splice(i,1);
+  localStorage.setItem(CLASS_STORE_KEY,JSON.stringify(list));
+  if(typeof QK.teacher==='function') QK.teacher();
+}
+window.deleteSavedClass=deleteSavedClass;
 function savedClassHTML(){
   const list=loadSavedClasses();
   if(!list.length) return '<div class="qk-status">📦 Belum ada kelas tersimpan di perangkat ini.</div>';
@@ -7302,7 +7316,9 @@ window.TSMTeacherQuestions = (() => {
 
 
 <!-- Adsterra Social Bar -->
-<script src="https://pl30935601.effectivecpmnetwork.com/e5/70/e1/e570e1d8ade3107c5368e7f4692a3446.js"></script>
+
+
+    <script src="https://pl30935601.effectivecpmnetwork.com/e5/70/e1/e570e1d8ade3107c5368e7f4692a3446.js"></script>
 </body></html>
 
 <style id="SIKAT-THEME-FINAL">
