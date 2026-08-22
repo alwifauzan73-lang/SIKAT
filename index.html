@@ -636,9 +636,9 @@ renderMaterials();renderFlows();renderSystems();updateAuthNav();document.getElem
       <div class="muted">Satu guru dapat membuka kelas dan beberapa siswa masuk dari HP/laptop masing-masing menggunakan kode yang sama.</div>
     </div>
     <div>
-      <button type="button" class="qk-btn" onclick="QK.home()">Beranda Quiz</button>
-      <button type="button" class="qk-btn" onclick="QK.teacher()">👨‍🏫 Mode Guru</button>
-      <button type="button" class="qk-btn" onclick="QK.student()">👨‍🎓 Mode Siswa</button>
+      <button type="button" class="qk-btn" onclick="window.SIKAT_PUSH_BACK_STATE&&window.SIKAT_PUSH_BACK_STATE('home');QK.home()">Beranda Quiz</button>
+      <button type="button" class="qk-btn" onclick="window.SIKAT_PUSH_BACK_STATE&&window.SIKAT_PUSH_BACK_STATE('teacher');QK.teacher()">👨‍🏫 Mode Guru</button>
+      <button type="button" class="qk-btn" onclick="window.SIKAT_PUSH_BACK_STATE&&window.SIKAT_PUSH_BACK_STATE('student');QK.student()">👨‍🎓 Mode Siswa</button>
     </div>
   </div>
   <div id="qk-app"></div>
@@ -7343,6 +7343,46 @@ window.TSMTeacherQuestions = (() => {
 
 
     <script src="https://pl30935601.effectivecpmnetwork.com/e5/70/e1/e570e1d8ade3107c5368e7f4692a3446.js"></script>
+
+<script>
+/* SIKAT Mobile Back Navigation
+   Tombol Back HP/browser mengikuti navigasi internal SIKAT. */
+(function(){
+  const KEY='__SIKAT_SPA_HISTORY_V1__';
+
+  function snapshot(){
+    return {url:location.href, scrollY:window.scrollY||0};
+  }
+
+  try{
+    if(!history.state || !history.state[KEY]){
+      history.replaceState({[KEY]:snapshot()},'',location.href);
+    }
+  }catch(e){}
+
+  // Dipakai oleh navigasi internal SIKAT.
+  window.SIKAT_PUSH_BACK_STATE=function(label){
+    try{
+      const s=snapshot();
+      history.pushState({[KEY]:s,label:label||''},'',location.href);
+    }catch(e){}
+  };
+
+  // Jangan biarkan Back HP langsung meninggalkan SIKAT ketika
+  // masih ada halaman/menu internal yang sudah dibuat oleh aplikasi.
+  window.addEventListener('popstate',function(){
+    try{
+      const s=history.state && history.state[KEY];
+      if(s && typeof s.scrollY==='number'){
+        setTimeout(function(){
+          window.scrollTo(0,s.scrollY);
+        },0);
+      }
+    }catch(e){}
+  });
+})();
+</script>
+
 </body></html>
 
 <style id="SIKAT-THEME-FINAL">
