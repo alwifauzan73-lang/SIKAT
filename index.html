@@ -241,25 +241,40 @@ const FLOWS=[
 , ["08", "Pembersihan dan Penataan", "Bersihkan area kerja, komponen, dan kendaraan; pastikan tidak ada alat atau material tertinggal."], ["09", "Pemeriksaan Keselamatan Akhir", "Pastikan pengencangan, level fluida, konektor, pelindung, dan komponen terkait sudah aman sebelum pengujian."], ["10", "Uji Fungsi dan Jalan", "Uji fungsi di tempat dan lakukan uji jalan bila diperlukan serta kondisi aman untuk melakukannya."], ["11", "Konfirmasi Keluhan", "Pastikan keluhan awal benar-benar teratasi dan tidak muncul gejala baru."], ["12", "Serah Terima dan Rekomendasi", "Jelaskan pekerjaan yang dilakukan, hasil pemeriksaan, dan rekomendasi perawatan berikutnya."]];
 function toggleMenu(){document.getElementById('mobile').classList.toggle('show')}
 function go(id,arg){
-  /* History browser untuk navigasi SPA SIKAT.
-     Saat dipanggil oleh tombol Back HP, __SIKAT_BACKING__ mencegah
-     pembuatan history baru sehingga Back benar-benar mundur satu layar. */
+  /*
+   * SIKAT menggunakan satu HTML dengan banyak .page.
+   * Karena itu setiap perpindahan internal harus dibuat menjadi
+   * satu browser-history entry agar tombol Back HP dapat mundur
+   * satu tampilan, bukan keluar dari website.
+   */
   if(!window.__SIKAT_BACKING__){
     try{
-      history.pushState(
-        {sikat:true,id:id,arg:arg===undefined?null:arg},
-        '',
-        location.href
-      );
+      const prev=history.state;
+      const same=prev && prev.sikat===true &&
+                 prev.id===id &&
+                 JSON.stringify(prev.arg===undefined?null:prev.arg)===
+                 JSON.stringify(arg===undefined?null:arg);
+      if(!same){
+        history.pushState(
+          {sikat:true,id:id,arg:arg===undefined?null:arg},
+          '',
+          location.href
+        );
+      }
     }catch(e){}
   }
 
   document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
   const target=document.getElementById(id); if(!target)return;
-  target.classList.add('active');document.getElementById('mobile').classList.remove('show');window.scrollTo(0,0);
+  target.classList.add('active');
+  document.getElementById('mobile').classList.remove('show');
+  window.scrollTo(0,0);
   if(id==='materials')renderMaterials();
   if(id==='systems')renderSystems();
-  if(id==='components'){document.getElementById('componentSearch').value='';document.getElementById('componentResults').innerHTML='<div class="card empty">Ketik nama komponen untuk mencari.</div>'}
+  if(id==='components'){
+    document.getElementById('componentSearch').value='';
+    document.getElementById('componentResults').innerHTML='<div class="card empty">Ketik nama komponen untuk mencari.</div>'
+  }
   if(id==='materialDetail'&&arg)showMaterial(arg);
   if(id==='subDetail'&&arg)showSubDetail(arg);
   if(id==='componentDetail'&&arg)showComponent(arg);
@@ -649,9 +664,9 @@ renderMaterials();renderFlows();renderSystems();updateAuthNav();document.getElem
       <div class="muted">Satu guru dapat membuka kelas dan beberapa siswa masuk dari HP/laptop masing-masing menggunakan kode yang sama.</div>
     </div>
     <div>
-      <button type="button" class="qk-btn" onclick="QK.home()">Beranda Quiz</button>
-      <button type="button" class="qk-btn" onclick="QK.teacher()">👨‍🏫 Mode Guru</button>
-      <button type="button" class="qk-btn" onclick="QK.student()">👨‍🎓 Mode Siswa</button>
+      <button type="button" class="qk-btn" onclick="window.SIKAT_PUSH_BACK_STATE&&window.SIKAT_PUSH_BACK_STATE('home');QK.home()">Beranda Quiz</button>
+      <button type="button" class="qk-btn" onclick="window.SIKAT_PUSH_BACK_STATE&&window.SIKAT_PUSH_BACK_STATE('teacher');QK.teacher()">👨‍🏫 Mode Guru</button>
+      <button type="button" class="qk-btn" onclick="window.SIKAT_PUSH_BACK_STATE&&window.SIKAT_PUSH_BACK_STATE('student');QK.student()">👨‍🎓 Mode Siswa</button>
     </div>
   </div>
   <div id="qk-app"></div>
@@ -7358,40 +7373,39 @@ window.TSMTeacherQuestions = (() => {
     <script src="https://pl30935601.effectivecpmnetwork.com/e5/70/e1/e570e1d8ade3107c5368e7f4692a3446.js"></script>
 
 <script>
-/* =========================================================
-   SIKAT — BACK HP / BROWSER
-   Menangani navigasi SPA utama melalui fungsi go().
-   ========================================================= */
+/* SIKAT: Back HP / Browser */
 (function(){
-  if(window.__SIKAT_BACK_HANDLER__) return;
-  window.__SIKAT_BACK_HANDLER__=true;
+  if(window.__SIKAT_BACK_HANDLER_INSTALLED__) return;
+  window.__SIKAT_BACK_HANDLER_INSTALLED__=true;
   window.__SIKAT_BACKING__=false;
 
-  try{
-    // Entry pertama: Back pertama akan mundur di dalam SIKAT,
-    // bukan langsung meninggalkan website.
-    if(!history.state || !history.state.sikat){
-      history.replaceState(
-        {sikat:true,id:'home',arg:null,initial:true},
-        '',
-        location.href
-      );
-    }
-  }catch(e){}
-
-  window.addEventListener('popstate',function(event){
-    const s=event.state;
-
-    // State dari SIKAT -> tampilkan halaman/menu sebelumnya.
-    if(s && s.sikat && s.id){
-      window.__SIKAT_BACKING__=true;
-      try{
-        go(s.id,s.arg===null?undefined:s.arg);
-      }finally{
-        setTimeout(function(){
-          window.__SIKAT_BACKING__=false;
-        },0);
+  function initialScreen(){
+    try{
+      if(!history.state || history.state.sikat!==true){
+        history.replaceState(
+          {sikat:true,id:'home',arg:null,initial:true},
+          '',
+          location.href
+        );
       }
+    }catch(e){}
+  }
+
+  initialScreen();
+
+  window.addEventListener('popstate',function(e){
+    const s=e.state;
+    if(!s || s.sikat!==true || !s.id) return;
+
+    window.__SIKAT_BACKING__=true;
+    try{
+      go(s.id, s.arg===null ? undefined : s.arg);
+    }catch(err){
+      console.error('SIKAT Back navigation:',err);
+    }finally{
+      setTimeout(function(){
+        window.__SIKAT_BACKING__=false;
+      },0);
     }
   });
 })();
