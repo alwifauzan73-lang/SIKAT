@@ -6749,7 +6749,7 @@ const QK={
      conn.on('data',d=>QK.teacherData(conn,d));
      conn.on('close',()=>{
        const id=conn.__studentId;
-       if(id && state.session.students[id]) delete state.session.students[id];
+       if(id && state.session.students[id] && !state.session.students[id].done) delete state.session.students[id];
        QK.refreshTeacherLobby();
        QK.refreshTeacherResults();
      });
@@ -6819,11 +6819,12 @@ const QK={
     '<label>Kode Kelas</label><input id="qk-code" class="qk-field" maxlength="12" placeholder="Contoh: TSM-AB12CD34">'+
     '<label>Nama Siswa</label><input id="qk-name" class="qk-field" maxlength="40" placeholder="Nama kamu">'+
     qButton('🚀 Masuk Kelas','QK.join()',true)+'<div id="qk-join-out"></div></div>');
+    setTimeout(()=>{const b=document.getElementById('qk-app');if(b)b.insertAdjacentHTML('beforeend',renderStudentHistory())},0);
  },
  join(){
    const code=$('qk-code').value.trim().toUpperCase(),name=$('qk-name').value.trim();
    if(!code||!name){$('qk-join-out').innerHTML='<div class="qk-status">⚠️ Kode kelas dan nama wajib diisi.</div>';return}
-   closePeer();state.name=name;state.finished=false;
+   closePeer();state.name=name;state.classCode=code;state.finished=false;
    $('qk-join-out').innerHTML='<div class="qk-status">⏳ Menghubungkan ke kelas...</div>';
    state.peer=new Peer(undefined,{debug:0});
    state.peer.on('open',id=>{
@@ -6894,6 +6895,16 @@ const QK={
    setApp('<div class="qk-card" style="text-align:center"><span class="tag">SELESAI</span><h2>🎉 Quiz Selesai</h2><div style="font-size:52px;font-weight:900">'+percent+'</div><p>'+state.score+' dari '+total+' jawaban benar.</p><div class="qk-status">✅ Hasil sudah dikirim ke guru. Guru dapat melihat ranking kelas.</div>'+qButton('Kembali ke Quiz','QK.home()',true)+'</div>');
  }
 };
+/* ===== RIWAYAT KELAS SISWA + RANKING PERSISTEN ===== */
+const STUDENT_HISTORY_KEY='tsm_student_class_history_v1', CLASS_RESULTS_KEY='tsm_class_results_v1';
+function loadStudentHistory(){try{return JSON.parse(localStorage.getItem(STUDENT_HISTORY_KEY)||'[]')}catch(e){return[]}}
+function saveStudentHistory(x){const a=loadStudentHistory(),i=a.findIndex(v=>v.code===x.code),z={...x,updatedAt:Date.now()};if(i>=0)a[i]={...a[i],...z};else a.unshift(z);localStorage.setItem(STUDENT_HISTORY_KEY,JSON.stringify(a.slice(0,20)))}
+function loadClassResults(){try{return JSON.parse(localStorage.getItem(CLASS_RESULTS_KEY)||'{}')}catch(e){return{}}}
+function saveClassResult(code,r){const a=loadClassResults(),k=String(code||'').toUpperCase();a[k]=a[k]||{};const id=String(r.id||r.name||'Siswa');a[k][id]={id,name:String(r.name||'Siswa'),score:+r.score||0,total:+r.total||0,percent:+r.percent||0,time:+r.time||0,done:true};localStorage.setItem(CLASS_RESULTS_KEY,JSON.stringify(a))}
+function getClassResults(code){return loadClassResults()[String(code||'').toUpperCase()]||{}}
+function renderStudentHistory(){const a=loadStudentHistory();if(!a.length)return '<div class="qk-status">📚 Belum ada riwayat kelas.</div>';return '<div class="qk-card"><h3>📚 Riwayat Kelas Saya</h3><p class="qk-note">Nilai tersimpan di perangkat ini. Jika guru masih membuka kelas, tekan <b>Masuk Lagi</b>.</p>'+a.map((x,i)=>'<div class="qk-status" style="margin-bottom:10px"><b>'+esc(x.title||'Quiz Kelas')+'</b><br><span class="qk-code" style="font-size:20px">'+esc(x.code)+'</span><br>👤 '+esc(x.name||'Siswa')+' · Nilai <b>'+(x.percent??'-')+'</b><br><small>'+new Date(x.updatedAt).toLocaleString('id-ID')+'</small><br>'+qButton('🔄 Masuk Lagi','QK.rejoinHistory('+i+')',true)+' '+qButton('🗑️ Hapus','deleteStudentHistory('+i+')',false)+'</div>').join('')+'</div>'}
+function deleteStudentHistory(i){const a=loadStudentHistory();if(i<0||i>=a.length)return;a.splice(i,1);localStorage.setItem(STUDENT_HISTORY_KEY,JSON.stringify(a));QK.student()}window.deleteStudentHistory=deleteStudentHistory;
+
 /* ===== KELAS TANPA LOGIN + TERSIMPAN DI PERANGKAT GURU ===== */
 const CLASS_STORE_KEY='tsm_saved_classes_v2';
 function loadSavedClasses(){try{return JSON.parse(localStorage.getItem(CLASS_STORE_KEY)||'[]')}catch(e){return[]}}
@@ -6930,7 +6941,7 @@ QK.reopenSaved=function(i){
   setApp('<div class="qk-card"><h3>🔄 Membuka kelas...</h3><div class="qk-status">Menghubungkan kembali kelas <b>'+esc(saved.code)+'</b>. Jangan tutup halaman ini.</div></div>');
   state.peer=new Peer(saved.peerId||saved.code,{debug:0});
   const timeout=setTimeout(()=>{if(document.getElementById('qk-app'))setApp('<div class="qk-card"><h3>⚠️ Kelas belum dapat dibuka</h3><div class="qk-status">Kode kelas tetap tersimpan. Pastikan internet aktif dan tidak ada perangkat lain yang sedang memakai kelas ini, lalu coba lagi.</div>'+qButton('↩️ Kembali','QK.teacher()',true)+'</div>')},15000);
-  state.peer.on('open',()=>{clearTimeout(timeout);state.session.peerId=state.peer._id||saved.peerId;state.session.code=saved.code;saveClassSession(state.session);QK.teacherLobby()});
+  state.peer.on('open',()=>{clearTimeout(timeout);state.session.peerId=state.peer._id||saved.peerId;state.session.code=saved.code;Object.assign(state.session.students,getClassResults(state.session.code));saveClassSession(state.session);QK.teacherLobby()});
   state.peer.on('connection',conn=>{
     state.connections.push(conn);
     conn.on('open',()=>{try{conn.send({type:'session',title:state.session.title,count:state.session.questions.length,time:state.session.time,started:state.session.started})}catch(e){}});
