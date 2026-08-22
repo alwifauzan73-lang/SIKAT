@@ -6738,6 +6738,7 @@ const QK={
      opened=true;clearTimeout(openTimeout);
      state.session.peerId=id;
      state.session.code=classCode;
+     Object.assign(state.session.students,getClassResults(state.session.code));
      saveClassSession(state.session);
      QK.teacherLobby();
    });
@@ -6779,19 +6780,25 @@ const QK={
  teacherData(conn,d){
    if(!d||!state.session)return;
    if(d.type==='join'){
-     if(state.session.started){conn.send({type:'closed'});return}
-     const id=d.id||Math.random().toString(36).slice(2);
-     conn.__studentId=id;
-     state.session.students[id]={id,name:String(d.name||'Siswa'),conn,done:false,score:0,total:state.session.questions.length,percent:0};
-     conn.send({type:'joined',ok:true,title:state.session.title,count:state.session.questions.length});
+     const studentKey=String(d.studentKey||'');
+     let existingId=Object.keys(state.session.students||{}).find(k=>{const s=state.session.students[k];return (studentKey&&s.studentKey===studentKey)||(s.name===String(d.name||'Siswa')&&!s.done)});
+     if(existingId){
+       const st=state.session.students[existingId];st.conn=conn;conn.__studentId=existingId;conn.__studentKey=st.studentKey;
+       conn.send({type:state.session.started?'resume':'joined',ok:true,title:state.session.title,count:state.session.questions.length,time:state.session.time,questions:state.session.questions,completed:!!st.done,percent:st.percent||0,score:st.score||0,total:st.total||state.session.questions.length});
+       QK.refreshTeacherLobby();QK.refreshTeacherResults();return;
+     }
+     const id=studentKey||d.id||Math.random().toString(36).slice(2);
+     conn.__studentId=id;conn.__studentKey=id;
+     state.session.students[id]={id,studentKey:id,name:String(d.name||'Siswa'),conn,done:false,score:0,total:state.session.questions.length,percent:0};
+     conn.send({type:state.session.started?'resume':'joined',ok:true,title:state.session.title,count:state.session.questions.length,time:state.session.time,questions:state.session.questions});
      QK.refreshTeacherLobby();
    }else if(d.type==='result'){
-     const st=state.session.students[d.id];
-     if(st){st.score=+d.score||0;st.total=+d.total||state.session.questions.length;st.percent=+d.percent||0;st.done=true;st.time=+d.time||0}
-     QK.refreshTeacherResults();
+     const st=state.session.students[d.id]||Object.values(state.session.students).find(x=>x.studentKey===d.studentKey);
+     if(st){st.score=+d.score||0;st.total=+d.total||state.session.questions.length;st.percent=+d.percent||0;st.done=true;st.time=+d.time||0;st.studentKey=d.studentKey||st.studentKey}
+     saveClassResult(state.session.code,d);QK.refreshTeacherResults();
    }
  },
- start(){
+start(){
    if(!state.session)return;
    const students=Object.values(state.session.students||{});
    if(!students.length){
@@ -6824,7 +6831,7 @@ const QK={
  join(){
    const code=$('qk-code').value.trim().toUpperCase(),name=$('qk-name').value.trim();
    if(!code||!name){$('qk-join-out').innerHTML='<div class="qk-status">⚠️ Kode kelas dan nama wajib diisi.</div>';return}
-   closePeer();state.name=name;state.classCode=code;state.finished=false;
+   closePeer();state.name=name;state.classCode=code;state.studentKey=getOrCreateStudentKey(code,name);state.finished=false;saveStudentHistory({code,title:'Kelas '+code,name:state.name,studentKey:state.studentKey,status:'Terakhir bergabung'});
    $('qk-join-out').innerHTML='<div class="qk-status">⏳ Menghubungkan ke kelas...</div>';
    state.peer=new Peer(undefined,{debug:0});
    state.peer.on('open',id=>{
@@ -6836,7 +6843,7 @@ const QK={
      },15000);
      state.conn.on('open',()=>{
        connected=true;clearTimeout(joinTimeout);
-       state.conn.send({type:'join',id:state.studentId,name:state.name});
+       state.conn.send({type:'join',id:state.studentId,studentKey:state.studentKey,name:state.name});
      });
      state.conn.on('data',d=>QK.studentData(d));
      state.conn.on('close',()=>{
@@ -6850,20 +6857,25 @@ const QK={
    });
    state.peer.on('error',e=>{if($('qk-join-out'))$('qk-join-out').innerHTML='<div class="qk-status">❌ Tidak dapat masuk. Pastikan kode benar, guru masih membuka kelas, dan internet aktif.</div>'});
  },
+ rejoinHistory(i){
+   const a=loadStudentHistory(),x=a[i];if(!x)return;
+   state.name=x.name||'Siswa';state.classCode=x.code;state.studentKey=x.studentKey||getOrCreateStudentKey(x.code,state.name);
+   QK.student();
+   setTimeout(()=>{if($('qk-code'))$('qk-code').value=x.code;if($('qk-name'))$('qk-name').value=x.name||'';QK.join()},0);
+ },
  studentData(d){
-   if(d.type==='joined'){
-     $('qk-join-out').innerHTML='<div class="qk-status">✅ Berhasil masuk. Menunggu guru memulai quiz...</div>';
-   }else if(d.type==='closed'){
-     $('qk-join-out').innerHTML='<div class="qk-status">⚠️ Quiz sudah dimulai. Tunggu kelas berikutnya.</div>';
-     try{state.conn.close()}catch(e){}
-   }else if(d.type==='start'){
-     state.quiz=shuffle(d.questions);state.index=0;state.score=0;state.left=d.time*60;state.answered=false;state.finished=false;
-     QK.renderStudent();
-     clearInterval(state.timer);
-     state.timer=setInterval(()=>{state.left--;QK.updateTimer();if(state.left<=0)QK.finishStudent()},1000);
+   if(d.type==='joined'||d.type==='resume'){
+     state.classTitle=d.title||state.classTitle||('Kelas '+state.classCode);
+     saveStudentHistory({code:state.classCode,title:state.classTitle,name:state.name,studentKey:state.studentKey,status:d.completed?'Selesai':'Terhubung'});
+     if(d.completed){$('qk-join-out').innerHTML='<div class="qk-status">✅ Kamu sudah menyelesaikan quiz ini. Nilai tetap tersimpan di ranking.</div>';return;}
+     if(d.type==='resume'){
+       state.quiz=shuffle(d.questions||[]);state.index=0;state.score=0;state.left=(d.time||10)*60;state.answered=false;state.finished=false;
+       QK.renderStudent();clearInterval(state.timer);
+       state.timer=setInterval(()=>{state.left--;QK.updateTimer();if(state.left<=0)QK.finishStudent()},1000);
+     }else $('qk-join-out').innerHTML='<div class="qk-status">✅ Berhasil masuk. Menunggu guru memulai quiz...</div>';
    }
  },
- renderStudent(){
+renderStudent(){
    const q=state.quiz[state.index];if(!q)return;
    const opts=shuffle(q.a.map((text,k)=>({text,k})));
    const pct=Math.round(state.index/state.quiz.length*100);
@@ -6896,12 +6908,13 @@ const QK={
  }
 };
 /* ===== RIWAYAT KELAS SISWA + RANKING PERSISTEN ===== */
-const STUDENT_HISTORY_KEY='tsm_student_class_history_v1', CLASS_RESULTS_KEY='tsm_class_results_v1';
+const STUDENT_HISTORY_KEY='tsm_student_class_history_v2', CLASS_RESULTS_KEY='tsm_class_results_v2';
 function loadStudentHistory(){try{return JSON.parse(localStorage.getItem(STUDENT_HISTORY_KEY)||'[]')}catch(e){return[]}}
 function saveStudentHistory(x){const a=loadStudentHistory(),i=a.findIndex(v=>v.code===x.code),z={...x,updatedAt:Date.now()};if(i>=0)a[i]={...a[i],...z};else a.unshift(z);localStorage.setItem(STUDENT_HISTORY_KEY,JSON.stringify(a.slice(0,20)))}
 function loadClassResults(){try{return JSON.parse(localStorage.getItem(CLASS_RESULTS_KEY)||'{}')}catch(e){return{}}}
-function saveClassResult(code,r){const a=loadClassResults(),k=String(code||'').toUpperCase();a[k]=a[k]||{};const id=String(r.id||r.name||'Siswa');a[k][id]={id,name:String(r.name||'Siswa'),score:+r.score||0,total:+r.total||0,percent:+r.percent||0,time:+r.time||0,done:true};localStorage.setItem(CLASS_RESULTS_KEY,JSON.stringify(a))}
+function saveClassResult(code,r){const a=loadClassResults(),k=String(code||'').toUpperCase();a[k]=a[k]||{};const id=String(r.studentKey||r.id||r.name||'Siswa');a[k][id]={id,name:String(r.name||'Siswa'),studentKey:r.studentKey||id,score:+r.score||0,total:+r.total||0,percent:+r.percent||0,time:+r.time||0,done:true};localStorage.setItem(CLASS_RESULTS_KEY,JSON.stringify(a))}
 function getClassResults(code){return loadClassResults()[String(code||'').toUpperCase()]||{}}
+function getOrCreateStudentKey(code,name){const a=loadStudentHistory(),x=a.find(v=>v.code===code&&v.name===name);return x?.studentKey||('stu_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8))}
 function renderStudentHistory(){const a=loadStudentHistory();if(!a.length)return '<div class="qk-status">📚 Belum ada riwayat kelas.</div>';return '<div class="qk-card"><h3>📚 Riwayat Kelas Saya</h3><p class="qk-note">Nilai tersimpan di perangkat ini. Jika guru masih membuka kelas, tekan <b>Masuk Lagi</b>.</p>'+a.map((x,i)=>'<div class="qk-status" style="margin-bottom:10px"><b>'+esc(x.title||'Quiz Kelas')+'</b><br><span class="qk-code" style="font-size:20px">'+esc(x.code)+'</span><br>👤 '+esc(x.name||'Siswa')+' · Nilai <b>'+(x.percent??'-')+'</b><br><small>'+new Date(x.updatedAt).toLocaleString('id-ID')+'</small><br>'+qButton('🔄 Masuk Lagi','QK.rejoinHistory('+i+')',true)+' '+qButton('🗑️ Hapus','deleteStudentHistory('+i+')',false)+'</div>').join('')+'</div>'}
 function deleteStudentHistory(i){const a=loadStudentHistory();if(i<0||i>=a.length)return;a.splice(i,1);localStorage.setItem(STUDENT_HISTORY_KEY,JSON.stringify(a));QK.student()}window.deleteStudentHistory=deleteStudentHistory;
 
@@ -6946,7 +6959,7 @@ QK.reopenSaved=function(i){
     state.connections.push(conn);
     conn.on('open',()=>{try{conn.send({type:'session',title:state.session.title,count:state.session.questions.length,time:state.session.time,started:state.session.started})}catch(e){}});
     conn.on('data',d=>QK.teacherData(conn,d));
-    conn.on('close',()=>{const id=conn.__studentId;if(id&&state.session.students[id])delete state.session.students[id];QK.refreshTeacherLobby();QK.refreshTeacherResults()});
+    conn.on('close',()=>{const id=conn.__studentId;if(id&&state.session.students[id]&&!state.session.students[id].done)delete state.session.students[id];QK.refreshTeacherLobby();QK.refreshTeacherResults()});
   });
   state.peer.on('error',()=>{});
 };
